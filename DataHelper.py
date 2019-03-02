@@ -15,27 +15,26 @@ def one_hot_encode(x, size):
 from videotransforms.video_transforms import Compose, Resize, RandomCrop, RandomRotation, ColorJitter
 from videotransforms.volume_transforms import ClipToTensor
 
-frame_size = (200, 200)
-scale_size = (200, 356)
-
-
-video_transform_list = [
-    RandomRotation(20),
-    Resize(scale_size),
-    RandomCrop(frame_size),
-    ColorJitter(0.1, 0.1, 0.1, 0.1),
-    ClipToTensor(channel_nb=3)
-]
-
-video_transform = Compose(video_transform_list)
-
 # Dataset for the 3D CNN model, returns sequence of frames (every second frame) from video
 class VideoFramesDataset(Dataset):
-    def __init__(self):
+    def __init__(self, frame_size):
         super(VideoFramesDataset, self).__init__()
 
         self.root_dir = "../Datasets/emotion_detection/full/"
         self.video_names = os.listdir(self.root_dir)
+
+        aspect_ratio = 720 / 1280
+        scale_size = (frame_size[0], int(frame_size[1] / aspect_ratio)) 
+        
+        video_transform_list = [
+            RandomRotation(20),
+            Resize(scale_size),
+            RandomCrop(frame_size),
+            ColorJitter(0.1, 0.1, 0.1, 0.1),
+            ClipToTensor(channel_nb=3)
+        ]
+
+        self.video_transform = Compose(video_transform_list)
 
         '''
         Modality (01 = full-AV, 02 = video-only, 03 = audio-only).
@@ -63,7 +62,7 @@ class VideoFramesDataset(Dataset):
         #one hot encoding the output
         emotion = one_hot_encode(self.emotion_label_dict[tags[2]], 8) 
         intensity = self.emotion_intensity_dict[tags[3]]
-        y = np.array(emotion + intensity)
+        y = np.array(emotion + [intensity])
 
         cap = cv.VideoCapture(self.root_dir + self.video_names[idx])
 
@@ -74,14 +73,14 @@ class VideoFramesDataset(Dataset):
             return_flag, frame = cap.read()
             counter = counter + 1
             
-            if not return_flag or frames_appended >= 20:
+            if not return_flag or frames_appended >= 45:
                 break
 
-            if counter % 3 == 0 and frames_appended <= 20:
+            if counter % 2 == 0 and frames_appended <= 45:
                 frames_appended += 1
                 frames.append(Image.fromarray(frame*255))
 
-        frames = video_transform(frames)
+        frames = self.video_transform(frames)
         return frames, y
 
     def __len__(self):
@@ -89,6 +88,6 @@ class VideoFramesDataset(Dataset):
 
 
 if __name__ == "__main__":
-    videoDataset = VideoFramesDataset()
+    videoDataset = VideoFramesDataset((200, 200))
     print(videoDataset[0][0].shape)
     print(len(videoDataset))

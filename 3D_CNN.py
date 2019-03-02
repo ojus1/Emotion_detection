@@ -3,6 +3,7 @@ from torch.utils.data import DataLoader
 import torch
 from DataHelper import VideoFramesDataset
 
+frame_size = (200, 200)
 
 def weights_init_normal(m):
     classname = m.__class__.__name__
@@ -23,15 +24,17 @@ class Video3DCNN(nn.Module):
         self.batch_size = batch_size
 
         self.norm1 = nn.BatchNorm3d(3, )
-        self.conv_block = ConvBlock(3, 8, k=5, stride=2)
-        self.conv_block += ConvBlock(8, 16, k=5, stride=2)
+        self.conv_block = ConvBlock(3, 8, k=5, stride=1)
+        self.conv_block += ConvBlock(8, 16, k=5, stride=1)
         self.conv_block += ConvBlock(16, 32, k=3, stride=1)
         self.conv_block += ConvBlock(32, 64, k=3, stride=1)
         self.conv_block += ConvBlock(64, 128, k=3, stride=1)
         self.conv_block += ConvBlock(128, 256, k=3, stride=1)
+        self.conv_block += ConvBlock(256, 512, k=3, stride=1)
+        self.conv_block += ConvBlock(512, 512, k=3, stride=1)
         self.conv_block = nn.ModuleList(self.conv_block)
 
-        self.fc1 = nn.Linear(1024, 256)
+        self.fc1 = nn.Linear(4096, 256)
         self.norm2 = nn.BatchNorm1d(256)
         self.fc2 = nn.Linear(256, 9)
 
@@ -60,49 +63,62 @@ def train_CNN():
 
     # Hyperparameters
     num_epochs = 50
-    batch_size = 3
+    batch_size = 5
     
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    dataset = VideoFramesDataset()
-    dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=3)
+    dataset = VideoFramesDataset(frame_size)
 
     #Initialize the model with random weights
     model = Video3DCNN(batch_size)
-    model.apply(weights_init_normal)
-
+    
     if torch.cuda.is_available():
-        model = model().cuda()
+        model = model.cuda()
         loss_func = loss_func.cuda()
         Tensor = torch.cuda.FloatTensor
+        dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=3, pin_memory=True)
+
     else:
         Tensor = torch.FloatTensor
-
+        dataloader = DataLoader(dataset, shuffle=True, batch_size=batch_size, num_workers=3)
+    
+    model = model.cuda()
+        
+    '''
     optimizer = torch.optim.SGD(model.parameters(),
                                 lr=1e-1,
                                 momentum=0.9,
                                 nesterov=True,
                                 weight_decay=1e-3)
-    
+    '''
+    optimizer = torch.optim.Adam(model.parameters(), weight_decay=1e-3)
+
+    model.apply(weights_init_normal)
+
     itr = 0
     best_loss = 10000
+    avg_loss = 30
     for epoch in range(num_epochs) :
         for X, y in dataloader :
-            #print(X.shape)
             optimizer.zero_grad()
+            X = X.cuda()
+            y = y.float().cuda()
 
-            y_pred = model(Tensor(X))
+            y_pred = model(X)
 
             loss = loss_func(y_pred, y)
 
             loss.backward()
             optimizer.step()
             
-            print('epoch [{}/{}], loss:{:.4f}, uIter: {}'.format(epoch+1, num_epochs, loss.item(), itr))
+            print('epoch [{}/{}], loss:{:.4f}, avg_loss: {:.4f}, uIter: {}'.format(epoch+1, num_epochs, loss.item(), avg_loss, itr))
             itr += 1
-            if best_loss > loss.item():
-                best_loss = loss.item()
+
+            avg_loss = (avg_loss + loss.item()) / 2
+            if best_loss > avg_loss:
+                best_loss = avg_loss
                 torch.save(model, 'models/3DCNN_{}_{}.pt'.format(epoch, best_loss))
+
 
 if __name__ == "__main__":
     train_CNN()
