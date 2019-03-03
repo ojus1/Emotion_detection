@@ -2,7 +2,25 @@ from torch import nn
 from torch.utils.data import DataLoader
 import torch
 from DataHelper import VideoFramesDataset
+from sklearn.metrics import log_loss
 
+def model_score(model, dataset):
+    loss = log_loss(dataset[0][1], model(dataset[0][0]))
+    for x, y in dataset:
+        loss += log_loss(y, model(x))
+    return loss / len(dataset)
+
+def checkpoint(model, val_dataset, best_loss):
+    val_loss = model_score(model, val_dataset)
+    print("------------------------------------------------------------------------------")
+    print("Validation loss:", val_loss, "Best loss:", best_loss)
+    print("------------------------------------------------------------------------------")
+    if val_loss > best_loss:
+        print("Saving model, new best loss", val_loss)
+        torch.save(model, "models/resnet_cnn_{}.pth".format(val_loss))
+        return val_loss
+    print("Not saving model")
+    return None
 
 def weights_init_normal(m):
     classname = m.__class__.__name__
@@ -64,11 +82,14 @@ def train_CNN():
     
     #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    dataset = VideoFramesDataset()
+    dataset = VideoFramesDataset(root_dir="data/video/train/")
+    val_dataset = VideoFramesDataset(root_dir="data/video/validation/")
 
     #Initialize the model with random weights
     model = Video1DCNN(batch_size)
-    
+    model.apply(weights_init_normal)
+
+    #Setting device to do compute    
     if torch.cuda.is_available():
         model = model.cuda()
         loss_func = loss_func.cuda()
@@ -90,7 +111,6 @@ def train_CNN():
     '''
     optimizer = torch.optim.Adam(model.parameters())
 
-    model.apply(weights_init_normal)
 
     itr = 0
     best_loss = 10000
@@ -109,18 +129,19 @@ def train_CNN():
             loss.backward()
             optimizer.step()
             
+            avg_loss = (avg_loss + loss.item()) / 2
+            
+            chckpt = checkpoint(model, val_dataset, best_loss)
+            if chckpt is not None:
+                best_loss = chckpt
+
             print('epoch [{}/{}], loss:{:.4f}, avg_loss: {:.4f}, uIter: {}'.format(epoch+1, num_epochs, loss.item(), avg_loss, itr))
             itr += 1
-
-            avg_loss = (avg_loss + loss.item()) / 2
-            if best_loss > avg_loss:
-                best_loss = avg_loss
-                torch.save(model, 'models/3DCNN_{}_{}.pt'.format(epoch, best_loss))
-
+            
 
 if __name__ == "__main__":
     train_CNN()
     #model = Video3DCNN(2)
-    #x = torch.rand(2, 3, 20, 256, 256)
+    #x = torch.rand(2, 3, 45, 224, 224)
     #out = model(x)
     #print(out)
